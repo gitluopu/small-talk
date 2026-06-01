@@ -1,13 +1,13 @@
 ---
 name: small-talk
-description: 从 GitHub 拉取 open issue，读取完整对话，以 ai-paul[bot] 身份回复用户 gitluopu 的最后一条消息。
+description: 从 GitHub 拉取 open issue，读取完整对话，以 ai-paul[bot] 身份回复 gitluopu 的最新一批未回复消息。
 ---
 
 # Small Talk — AI Issue Responder
 
 ## 职责
 
-从 GitHub 拉取 open 状态的 issue，读取完整对话和评论，以 ai-paul[bot] 身份回复用户最后一条消息。
+处理调用方指定的 open issue（issue 编号已在 prompt 中提供），读取完整评论历史，以 ai-paul[bot] 身份回复需要回答的新消息。
 
 ## 禁止行为
 
@@ -15,16 +15,18 @@ description: 从 GitHub 拉取 open issue，读取完整对话，以 ai-paul[bot
 
 ## 工作流程
 
-1. 使用 `gh issue list --state open` 拉取所有 open issue
-2. 对每个 issue 使用 `gh issue view <number> --comments` 获取完整 conversation 和 comment
-3. 将所有历史 conversation / comment 作为上下文
-4. 定位用户（gitluopu）的最后一条 conversation 或 comment，这是需要回答的问题
-5. 生成回复，使用 `gh issue comment <number> --body "..."` 发布评论
-   - 该命令已配置为以 ai-paul[bot] 身份发布，无需额外处理身份
+1. 从 prompt 中取得需要处理的 issue 编号列表
+2. 对每个 issue 使用 `gh issue view <number> --comments` 获取完整评论历史，作为上下文
+3. 在评论列表中找到 **ai-paul[bot] 最后一条评论** 的位置
+4. 将该位置之后、直到 **gitluopu 最后一条评论**（含）之间的所有评论，作为需要回复的内容
+   - 不含 ai-paul[bot] 的最后一条评论
+   - 含 gitluopu 的最后一条评论
+   - 若 ai-paul[bot] 没有任何历史评论，则将所有评论（直到 gitluopu 最后一条）都视为待回复内容
+5. 生成一条综合回复，使用 `gh issue comment <number> --body "..."` 发布
 
 ## 注意事项
 
-- 目标用户名：gitluopu
-- 只回答最后一条用户消息，前面的内容仅作为上下文理解
+- 目标用户名：gitluopu；机器人账号：ai-paul[bot]
+- 所有评论均作为上下文理解，但只回复步骤 4 确定的那批新消息
 - 回复语言与用户消息保持一致（中文用中文，英文用英文）
-- 不要重复回答已经有 ai-paul[bot] 回复的最新消息
+- `gh issue comment` 已配置为以 ai-paul[bot] 身份发布，无需额外处理身份
