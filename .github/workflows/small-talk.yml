@@ -1,0 +1,39 @@
+name: Small Talk Bot
+
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+  schedule:
+    # Run every 6 hours as a fallback poll
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  reply:
+    runs-on: ubuntu-latest
+    # Skip if the event was triggered by a bot to avoid reply loops
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' && !endsWith(github.event.issue.user.login, '[bot]')) ||
+      (github.event_name == 'issue_comment' && !endsWith(github.event.comment.user.login, '[bot]'))
+    permissions:
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync
+        working-directory: ${{ github.workspace }}
+
+      - name: Run small-talk bot
+        run: uv run python main.py
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
