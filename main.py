@@ -2,15 +2,11 @@
 """
 过滤满足条件的 open issue，再调用 small-talk agent 回复。
 
-触发条件：issue 处于 open 状态，且最后一条评论的作者是 gitluopu
-（如果 issue 还没有任何评论，则检查 issue 本身的作者是否是 gitluopu）。
+触发条件：issue 处于 open 状态，且最新 timeline activity 的操作者名字中不包含 "bot"。
 """
 import json
 import subprocess
 import sys
-
-OWNER_LOGIN = "gitluopu"
-BOT_LOGIN = "ai-paul[bot]"
 
 
 def gh(*args: str) -> str:
@@ -23,24 +19,35 @@ def gh(*args: str) -> str:
     return result.stdout.strip()
 
 
+def get_repo() -> tuple[str, str]:
+    info = json.loads(gh("repo", "view", "--json", "owner,name"))
+    return info["owner"]["login"], info["name"]
+
+
 def get_qualifying_issues() -> list[int]:
-    raw = gh("issue", "list", "--state", "open", "--json", "number")
+    owner, repo = get_repo()
+    raw = gh("issue", "list", "--state", "open", "--json", "number,author")
     issues = json.loads(raw)
 
     qualifying = []
     for issue in issues:
         number = issue["number"]
-        detail = json.loads(gh("issue", "view", str(number), "--json", "author,comments"))
+        issue_author = issue["author"]["login"]
 
-        comments = detail.get("comments", [])
-        if not comments:
-            # 没有评论：bot 尚未回复，只有在 issue 由 gitluopu 开启时才处理
-            if detail.get("author", {}).get("login") == OWNER_LOGIN:
-                qualifying.append(number)
+        # REST timeline 包含所有类型的 activity（评论、打标签、关闭等）
+        # 评论事件用 user 字段，其余事件用 actor 字段
+        timeline = json.loads(
+            gh("api", "--paginate", f"/repos/{owner}/{repo}/issues/{number}/timeline")
+        )
+
+        if timeline:
+            last = timeline[-1]
+            last_actor = (last.get("actor") or last.get("user") or {}).get("login", "")
         else:
-            last_author = comments[-1].get("author", {}).get("login", "")
-            if last_author == OWNER_LOGIN:
-                qualifying.append(number)
+            last_actor = issue_author
+
+        if last_actor and "bot" not in last_actor.lower():
+            qualifying.append(number)
 
     return qualifying
 
