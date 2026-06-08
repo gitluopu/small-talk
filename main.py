@@ -1,76 +1,48 @@
 #!/usr/bin/env python3
 """
-过滤满足条件的 open issue，再调用 small-talk agent 回复。
-
-触发条件：issue 处于 open 状态，且最新 timeline activity 的操作者名字中不包含 "bot"。
+用 ghi-ctx 过滤需要回复的 open issue，再调用 small-talk agent 逐条回复。
 """
 import json
 import subprocess
 import sys
 
+REPO = "gitluopu/small-talk"
 
-def gh(*args: str) -> str:
+
+def main() -> None:
     result = subprocess.run(
-        ["gh", *args],
+        ["ghi-ctx", REPO],
         capture_output=True,
         text=True,
         check=True,
     )
-    return result.stdout.strip()
+    output = json.loads(result.stdout)
 
-
-def get_repo() -> tuple[str, str]:
-    info = json.loads(gh("repo", "view", "--json", "owner,name"))
-    return info["owner"]["login"], info["name"]
-
-
-def get_qualifying_issues() -> list[int]:
-    owner, repo = get_repo()
-    raw = gh("issue", "list", "--state", "open", "--json", "number,author")
-    issues = json.loads(raw)
-
-    qualifying = []
-    for issue in issues:
-        number = issue["number"]
-        issue_author = issue["author"]["login"]
-
-        # REST timeline 包含所有类型的 activity（评论、打标签、关闭等）
-        # 评论事件用 user 字段，其余事件用 actor 字段
-        timeline = json.loads(
-            gh("api", "--paginate", f"/repos/{owner}/{repo}/issues/{number}/timeline")
-        )
-
-        if timeline:
-            last = timeline[-1]
-            last_actor = (last.get("actor") or last.get("user") or {}).get("login", "")
-        else:
-            last_actor = issue_author
-
-        if last_actor and "bot" not in last_actor.lower():
-            qualifying.append(number)
-
-    return qualifying
-
-
-def main() -> None:
-    qualifying = get_qualifying_issues()
-
-    if not qualifying:
+    if not output["needHandleIssue"]:
         print("No qualifying issues.")
         sys.exit(0)
 
-    issue_list = ", ".join(f"#{n}" for n in qualifying)
-    print(f"Qualifying issue(s): {issue_list}. Invoking small-talk agent...")
+    procs = []
+    for issue in output["issues"]:
+        issue_id = issue["issueId"]
+        context = issue["context"]
+        problem = issue["problem"]
+        print(f"Handling issue #{issue_id}...")
+        proc = subprocess.Popen(
+            [
+                "claude",
+                "-p",
+                f"回复 issue #{issue_id}。\n\n ## 对话历史\n{context}\n\n## 待回复内容\n{problem}",
+                "--agent", "small-talk",
+                "--dangerously-skip-permissions",
+            ],
+        )
+        procs.append((issue_id, proc))
 
-    subprocess.run(
-        [
-            "claude",
-            "-p", f"处理以下 open issues 并回复：{issue_list}",
-            "--agent", "small-talk",
-            "--dangerously-skip-permissions",
-        ],
-        check=True,
-    )
+    for issue_id, proc in procs:
+        code = proc.wait()
+        if code != 0:
+            print(f"Issue #{issue_id} failed with exit code {code}", file=sys.stderr)
 
 
 if __name__ == "__main__":
